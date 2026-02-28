@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 400px;
+      min-height: 500px;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      padding: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid #2a2a3e;
+      padding-bottom: 12px;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #90caf9;
+    }
+    .header .version {
+      font-size: 10px;
+      color: #555;
+      margin-left: auto;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 200px;
+      background: #1a1a2e;
+      color: #ddd;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: #90caf9; }
+    textarea::placeholder { color: #444; }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 8px 0 14px;
+      font-size: 11px;
+      color: #666;
+    }
+    .stats-row .valid { color: #4caf50; font-weight: 600; }
+    .stats-row .invalid { color: #f44336; font-weight: 600; }
+
+    .config-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .config-row .field {
+      flex: 1;
+    }
+    .config-row input {
+      width: 100%;
+      background: #1a1a2e;
+      color: #ddd;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+    .config-row input:focus { border-color: #90caf9; }
+
+    .controls {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      transition: opacity 0.15s, transform 0.1s;
+      flex: 1;
+    }
+    button:hover { opacity: 0.85; }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+
+    .btn-start  { background: #4caf50; color: #fff; }
+    .btn-pause  { background: #ff9800; color: #fff; }
+    .btn-stop   { background: #f44336; color: #fff; }
+    .btn-reset  { background: #444; color: #ccc; }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1a1a2e;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .status-bar .status-text { font-weight: 700; }
+    .status-bar .progress { color: #90caf9; font-weight: 600; }
+
+    .log-container {
+      background: #111;
+      border-radius: 8px;
+      padding: 8px;
+      height: 120px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 10px;
+      line-height: 1.6;
+      color: #777;
+    }
+    .log-container::-webkit-scrollbar { width: 4px; }
+    .log-container::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+    .log-container .log-success { color: #4caf50; }
+    .log-container .log-warn { color: #ff9800; }
+    .log-container .log-error { color: #f44336; }
+    .log-container .log-info { color: #90caf9; }
+
+    .not-on-mj {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+    .not-on-mj a {
+      color: #90caf9;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <span style="font-size: 22px;">🎨</span>
+    <h1>MJ Auto-Prompter</h1>
+    <span class="version">v1.0</span>
+  </div>
+
+  <div id="main-ui">
+    <label>Prompts (one per line — must start with IMG + 2-3 digits)</label>
+    <textarea id="promptArea" placeholder="IMG001 A vast oak-panelled British government office...
+IMG002 A close-up of an open leather-bound calendar...
+IMG003 The interior of the British Parliament chamber..."></textarea>
+
+    <div class="stats-row">
+      <span>Lines: <span id="totalLines">0</span></span>
+      <span>Valid: <span id="validCount" class="valid">0</span></span>
+      <span>Invalid: <span id="invalidCount" class="invalid">0</span></span>
+    </div>
+
+    <div class="config-row">
+      <div class="field">
+        <label>Min Delay (sec)</label>
+        <input type="number" id="minDelay" value="1" min="0.5" max="30" step="0.5">
+      </div>
+      <div class="field">
+        <label>Max Delay (sec)</label>
+        <input type="number" id="maxDelay" value="2" min="0.5" max="30" step="0.5">
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-start" id="btnStart">▶ Start</button>
+      <button class="btn-pause" id="btnPause" disabled>⏸ Pause</button>
+      <button class="btn-stop" id="btnStop" disabled>⏹ Stop</button>
+      <button class="btn-reset" id="btnReset">↺</button>
+    </div>
+
+    <div class="status-bar">
+      <span class="status-text" id="statusText">⏹ Ready</span>
+      <span class="progress" id="progressText">0 / 0</span>
+    </div>
+
+    <div class="log-container" id="logArea"></div>
+  </div>
+
+  <div id="not-mj" class="not-on-mj" style="display:none;">
+    <p style="font-size: 28px; margin-bottom: 12px;">🎨</p>
+    <p>Navigate to <a href="https://www.midjourney.com" target="_blank">midjourney.com</a> first,</p>
+    <p>then open this extension.</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
