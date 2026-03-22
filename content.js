@@ -11,11 +11,13 @@
 
   // ---- Config (set per-run from popup) ----
   let MIN_DELAY = 1000;
-  let MAX_DELAY = 2000;
-  const TYPING_CHUNK_SIZE = 10;
-  const TYPING_CHUNK_DELAY = 12;
+  let MAX_DELAY = 3000;
+  let RELAXED_MODE = false;
+  let QUEUE_LIMIT = 12;
+
   const SUBMIT_PAUSE = 350;
-  const POST_SUBMIT_SETTLE = 600; // wait for MJ to process before next
+  const POST_SUBMIT_SETTLE = 600;
+  const QUEUE_POLL_INTERVAL = 2000; // check queue every 2 seconds
 
   // ---- State ----
   let prompts = [];
@@ -28,9 +30,7 @@
   function notify(type, data = {}) {
     try {
       chrome.runtime.sendMessage({ type, ...data });
-    } catch (e) {
-      // Popup may be closed, that's fine
-    }
+    } catch (e) {}
   }
 
   function logToPopup(text, level = "info") {
@@ -44,15 +44,14 @@
   }
 
   function getSubmitButton() {
-    // Primary: find button with PaperAirplane SVG
     const buttons = document.querySelectorAll("button");
     for (const btn of buttons) {
       if (btn.querySelector("svg g#PaperAirplane")) return btn;
     }
-    // Fallback: look near textarea for any submit-like button
     const ta = getTextarea();
     if (!ta) return null;
-    const parent = ta.closest("form") || ta.parentElement?.parentElement?.parentElement;
+    const parent =
+      ta.closest("form") || ta.parentElement?.parentElement?.parentElement;
     if (parent) {
       const btns = parent.querySelectorAll("button");
       for (const btn of btns) {
@@ -60,6 +59,48 @@
       }
     }
     return null;
+  }
+
+  // ---- Queue Detection ----
+  function getQueueCount() {
+    // Look for the "X queued jobs" element
+    const allDivs = document.querySelectorAll("div");
+    for (const div of allDivs) {
+      const text = div.textContent?.trim() || "";
+      const match = text.match(/^(\d+)\s+queued\s+jobs?$/i);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    // Element not on page = no queued jobs
+    return 0;
+  }
+
+  async function waitForQueueSlot(signal) {
+    if (!RELAXED_MODE) return;
+
+    let count = getQueueCount();
+    if (count < QUEUE_LIMIT) {
+      notify("queue_update", { count, waiting: false });
+      return;
+    }
+
+    logToPopup(
+      `⏳ Queue at ${count}/${QUEUE_LIMIT} — waiting for slot...`,
+      "warn"
+    );
+    notify("queue_update", { count, waiting: true });
+
+    while (count >= QUEUE_LIMIT) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+      await sleep(QUEUE_POLL_INTERVAL, signal);
+      count = getQueueCount();
+      notify("queue_update", { count, waiting: count >= QUEUE_LIMIT });
+    }
+
+    logToPopup(`✅ Queue dropped to ${count} — resuming`, "success");
+    notify("queue_update", { count, waiting: false });
   }
 
   // React-compatible value setter
@@ -106,8 +147,12 @@
     // Fire events so React picks it up
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
-    textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "a" }));
-    textarea.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "a" }));
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, key: "a" })
+    );
+    textarea.dispatchEvent(
+      new KeyboardEvent("keyup", { bubbles: true, key: "a" })
+    );
 
     await sleep(100, signal);
   }
@@ -121,10 +166,8 @@
       throw new Error("Submit button not found — is text in the input?");
     }
 
-    // Check button isn't disabled
     if (btn.disabled) {
-      logToPopup("Submit button is disabled — waiting...", "warn");
-      // Wait and retry up to 3 times
+      logToPopup("Submit button disabled — waiting...", "warn");
       for (let i = 0; i < 3; i++) {
         await sleep(500, signal);
         if (!btn.disabled) break;
@@ -135,7 +178,6 @@
     btn.click();
     logToPopup("✅ Submitted");
 
-    // Wait for MJ to process the submit
     await sleep(POST_SUBMIT_SETTLE, signal);
   }
 
@@ -148,14 +190,23 @@
     while (currentIndex < prompts.length) {
       if (signal.aborted) break;
 
-      // Handle pause
+      // Handle manual pause
       while (paused && !signal.aborted) {
         await sleep(250, signal).catch(() => {});
       }
       if (signal.aborted) break;
 
+      // Relaxed mode: wait for queue slot before submitting
+      try {
+        await waitForQueueSlot(signal);
+      } catch (err) {
+        if (err.name === "AbortError") break;
+        throw err;
+      }
+
       const prompt = prompts[currentIndex];
-      const label = prompt.match(/^(IMG\d{2,3})/)?.[1] || `#${currentIndex + 1}`;
+      const label =
+        prompt.match(/^(IMG\d{2,3})/)?.[1] || `#${currentIndex + 1}`;
       logToPopup(`🎨 [${currentIndex + 1}/${prompts.length}] Sending ${label}...`);
 
       try {
@@ -214,9 +265,13 @@
         prompts = msg.prompts || [];
         currentIndex = 0;
         MIN_DELAY = msg.minDelay || 1000;
-        MAX_DELAY = msg.maxDelay || 2000;
+        MAX_DELAY = msg.maxDelay || 3000;
+        RELAXED_MODE = msg.relaxedMode || false;
+        QUEUE_LIMIT = msg.queueLimit || 12;
         paused = false;
-        logToPopup(`📋 Received ${prompts.length} prompts`);
+        logToPopup(
+          `📋 Received ${prompts.length} prompts${RELAXED_MODE ? ` | Relaxed mode ON (limit: ${QUEUE_LIMIT})` : ""}`
+        );
         runLoop();
         sendResponse({ ok: true });
         break;
@@ -239,7 +294,6 @@
       default:
         sendResponse({ ok: false, error: "Unknown action" });
     }
-    // Return true for async response handling
     return true;
   });
 

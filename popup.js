@@ -8,6 +8,10 @@ const validCount = document.getElementById("validCount");
 const invalidCount = document.getElementById("invalidCount");
 const minDelayInput = document.getElementById("minDelay");
 const maxDelayInput = document.getElementById("maxDelay");
+const relaxedMode = document.getElementById("relaxedMode");
+const relaxedFields = document.getElementById("relaxedFields");
+const queueLimitInput = document.getElementById("queueLimit");
+const queueStatus = document.getElementById("queueStatus");
 const btnStart = document.getElementById("btnStart");
 const btnPause = document.getElementById("btnPause");
 const btnStop = document.getElementById("btnStop");
@@ -30,17 +34,19 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     tabId = tab.id;
     mainUI.style.display = "block";
     notMJ.style.display = "none";
-    // Ensure content script is injected
     chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ["content.js"],
-    }).catch(() => {
-      // Already injected, that's fine
-    });
+    }).catch(() => {});
   } else {
     mainUI.style.display = "none";
     notMJ.style.display = "block";
   }
+});
+
+// ---- Relaxed mode toggle ----
+relaxedMode.addEventListener("change", () => {
+  relaxedFields.classList.toggle("show", relaxedMode.checked);
 });
 
 // ---- Prompt validation on input ----
@@ -100,6 +106,8 @@ function updateUI() {
   btnStop.disabled = !running;
   btnPause.textContent = paused ? "▶ Resume" : "⏸ Pause";
   promptArea.disabled = running;
+  relaxedMode.disabled = running;
+  queueLimitInput.disabled = running;
 
   if (running && paused) statusText.textContent = "⏸ Paused";
   else if (running) statusText.textContent = "🟢 Running";
@@ -112,6 +120,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     log(msg.text, msg.level || "info");
   } else if (msg.type === "progress") {
     progressText.textContent = `${msg.current} / ${msg.total}`;
+  } else if (msg.type === "queue_update") {
+    queueStatus.textContent = `Queue: ${msg.count}`;
+    if (msg.waiting) {
+      queueStatus.style.color = "#f44336";
+    } else {
+      queueStatus.style.color = "#4caf50";
+    }
   } else if (msg.type === "done") {
     running = false;
     paused = false;
@@ -145,14 +160,23 @@ btnStart.addEventListener("click", async () => {
     return;
   }
 
+  const isRelaxed = relaxedMode.checked;
+  const queueLimit = parseInt(queueLimitInput.value) || 12;
+
   running = true;
   paused = false;
-  log(`🚀 Starting — ${prompts.length} prompts queued`, "info");
+  log(`🚀 Starting — ${prompts.length} prompts queued${isRelaxed ? ` (relaxed mode, queue limit: ${queueLimit})` : ""}`, "info");
   progressText.textContent = `0 / ${prompts.length}`;
   updateUI();
 
   try {
-    await sendToContent("start", { prompts, minDelay, maxDelay });
+    await sendToContent("start", {
+      prompts,
+      minDelay,
+      maxDelay,
+      relaxedMode: isRelaxed,
+      queueLimit,
+    });
   } catch (err) {
     log(`❌ Failed to connect: ${err.message}. Try refreshing the page.`, "error");
     running = false;
@@ -187,28 +211,38 @@ btnReset.addEventListener("click", async () => {
   running = false;
   paused = false;
   progressText.textContent = "0 / 0";
+  queueStatus.textContent = "";
   logArea.innerHTML = "";
   log("↺ Reset", "info");
   updateUI();
   try {
     await sendToContent("stop");
-  } catch (err) {
-    // Ignore if not running
-  }
+  } catch (err) {}
 });
 
 // ---- Persist prompts in local storage ----
 const STORAGE_KEY = "mj_auto_prompts";
+const SETTINGS_KEY = "mj_auto_settings";
 
-// Load saved prompts on open
-chrome.storage.local.get([STORAGE_KEY], (result) => {
+// Load saved data on open
+chrome.storage.local.get([STORAGE_KEY, SETTINGS_KEY], (result) => {
   if (result[STORAGE_KEY]) {
     promptArea.value = result[STORAGE_KEY];
     updateStats();
   }
+  if (result[SETTINGS_KEY]) {
+    const s = result[SETTINGS_KEY];
+    if (s.minDelay) minDelayInput.value = s.minDelay;
+    if (s.maxDelay) maxDelayInput.value = s.maxDelay;
+    if (s.relaxedMode) {
+      relaxedMode.checked = true;
+      relaxedFields.classList.add("show");
+    }
+    if (s.queueLimit) queueLimitInput.value = s.queueLimit;
+  }
 });
 
-// Auto-save on input (debounced)
+// Auto-save prompts (debounced)
 let saveTimer;
 promptArea.addEventListener("input", () => {
   clearTimeout(saveTimer);
@@ -216,3 +250,19 @@ promptArea.addEventListener("input", () => {
     chrome.storage.local.set({ [STORAGE_KEY]: promptArea.value });
   }, 500);
 });
+
+// Save settings on change
+function saveSettings() {
+  chrome.storage.local.set({
+    [SETTINGS_KEY]: {
+      minDelay: minDelayInput.value,
+      maxDelay: maxDelayInput.value,
+      relaxedMode: relaxedMode.checked,
+      queueLimit: queueLimitInput.value,
+    },
+  });
+}
+minDelayInput.addEventListener("change", saveSettings);
+maxDelayInput.addEventListener("change", saveSettings);
+relaxedMode.addEventListener("change", saveSettings);
+queueLimitInput.addEventListener("change", saveSettings);

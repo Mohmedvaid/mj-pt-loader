@@ -46,7 +46,7 @@
 
     textarea {
       width: 100%;
-      height: 200px;
+      height: 180px;
       background: #1a1a2e;
       color: #ddd;
       border: 1px solid #333;
@@ -80,7 +80,7 @@
     .config-row .field {
       flex: 1;
     }
-    .config-row input {
+    .config-row input[type="number"] {
       width: 100%;
       background: #1a1a2e;
       color: #ddd;
@@ -91,6 +91,81 @@
       outline: none;
     }
     .config-row input:focus { border-color: #90caf9; }
+
+    /* Relaxed mode section */
+    .relaxed-section {
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 14px;
+    }
+    .relaxed-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .relaxed-toggle input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #ff9800;
+      cursor: pointer;
+    }
+    .relaxed-toggle span {
+      font-size: 12px;
+      font-weight: 600;
+      color: #ddd;
+    }
+    .relaxed-toggle .hint {
+      font-size: 10px;
+      color: #666;
+      font-weight: 400;
+      margin-left: auto;
+    }
+    .relaxed-fields {
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #2a2a3e;
+    }
+    .relaxed-fields.show { display: block; }
+    .relaxed-fields .field-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .relaxed-fields label {
+      margin-bottom: 0;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .relaxed-fields input[type="number"] {
+      width: 70px;
+      background: #111;
+      color: #ff9800;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 13px;
+      font-weight: 700;
+      outline: none;
+      text-align: center;
+    }
+    .relaxed-fields input[type="number"]:focus { border-color: #ff9800; }
+    .relaxed-fields .field-hint {
+      font-size: 10px;
+      color: #555;
+      margin-top: 6px;
+    }
+    .queue-status {
+      display: inline-block;
+      margin-left: auto;
+      font-size: 11px;
+      color: #ff9800;
+      font-weight: 600;
+    }
 
     .controls {
       display: flex;
@@ -164,7 +239,7 @@
   <div class="header">
     <span style="font-size: 22px;">🎨</span>
     <h1>MJ Auto-Prompter</h1>
-    <span class="version">v1.0</span>
+    <span class="version">v1.1</span>
   </div>
 
   <div id="main-ui">
@@ -186,7 +261,24 @@ IMG003 The interior of the British Parliament chamber..."></textarea>
       </div>
       <div class="field">
         <label>Max Delay (sec)</label>
-        <input type="number" id="maxDelay" value="2" min="0.5" max="30" step="0.5">
+        <input type="number" id="maxDelay" value="3" min="0.5" max="30" step="0.5">
+      </div>
+    </div>
+
+    <!-- Relaxed Mode Section -->
+    <div class="relaxed-section">
+      <label class="relaxed-toggle">
+        <input type="checkbox" id="relaxedMode">
+        <span>🐢 Relaxed Mode</span>
+        <span class="hint">Queue-aware throttling</span>
+      </label>
+      <div class="relaxed-fields" id="relaxedFields">
+        <div class="field-row">
+          <label style="text-transform: none; color: #aaa;">Pause when queue hits</label>
+          <input type="number" id="queueLimit" value="12" min="1" max="50" step="1">
+          <span class="queue-status" id="queueStatus"></span>
+        </div>
+        <div class="field-hint">Monitors the "X queued jobs" indicator. Waits for queue to drop below this number before submitting more.</div>
       </div>
     </div>
 
