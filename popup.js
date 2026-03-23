@@ -34,15 +34,58 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     tabId = tab.id;
     mainUI.style.display = "block";
     notMJ.style.display = "none";
-    chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      files: ["content.js"],
-    }).catch(() => {});
+    chrome.scripting
+      .executeScript({
+        target: { tabId: tabId },
+        files: ["content.js"],
+      })
+      .catch(() => {})
+      .finally(() => {
+        // Give content script a moment to initialize, then check state
+        setTimeout(recoverState, 200);
+      });
   } else {
     mainUI.style.display = "none";
     notMJ.style.display = "block";
   }
 });
+
+// ---- Recover state from content script ----
+function recoverState() {
+  if (!tabId) return;
+  chrome.tabs.sendMessage(tabId, { action: "getState" }, (state) => {
+    if (chrome.runtime.lastError || !state) return;
+
+    running = state.running;
+    paused = state.paused;
+
+    if (running || state.currentIndex > 0) {
+      progressText.textContent = `${state.currentIndex} / ${state.totalPrompts}`;
+      promptArea.disabled = running;
+
+      if (state.relaxedMode) {
+        relaxedMode.checked = true;
+        relaxedFields.classList.add("show");
+        queueLimitInput.value = state.queueLimit;
+        if (state.queueCount > 0) {
+          queueStatus.textContent = `Queue: ${state.queueCount}`;
+          queueStatus.style.color =
+            state.queueCount >= state.queueLimit ? "#f44336" : "#4caf50";
+        }
+      }
+
+      if (running) {
+        log("📡 Reconnected — job still running", "info");
+      } else if (state.currentIndex >= state.totalPrompts && state.totalPrompts > 0) {
+        log("✅ Job already finished", "success");
+      } else if (state.currentIndex > 0) {
+        log(`⏹ Stopped at ${state.currentIndex}/${state.totalPrompts}`, "warn");
+      }
+    }
+
+    updateUI();
+  });
+}
 
 // ---- Relaxed mode toggle ----
 relaxedMode.addEventListener("change", () => {
@@ -165,7 +208,10 @@ btnStart.addEventListener("click", async () => {
 
   running = true;
   paused = false;
-  log(`🚀 Starting — ${prompts.length} prompts queued${isRelaxed ? ` (relaxed mode, queue limit: ${queueLimit})` : ""}`, "info");
+  log(
+    `🚀 Starting — ${prompts.length} prompts queued${isRelaxed ? ` (relaxed mode, queue limit: ${queueLimit})` : ""}`,
+    "info"
+  );
   progressText.textContent = `0 / ${prompts.length}`;
   updateUI();
 
@@ -224,7 +270,6 @@ btnReset.addEventListener("click", async () => {
 const STORAGE_KEY = "mj_auto_prompts";
 const SETTINGS_KEY = "mj_auto_settings";
 
-// Load saved data on open
 chrome.storage.local.get([STORAGE_KEY, SETTINGS_KEY], (result) => {
   if (result[STORAGE_KEY]) {
     promptArea.value = result[STORAGE_KEY];
@@ -242,7 +287,6 @@ chrome.storage.local.get([STORAGE_KEY, SETTINGS_KEY], (result) => {
   }
 });
 
-// Auto-save prompts (debounced)
 let saveTimer;
 promptArea.addEventListener("input", () => {
   clearTimeout(saveTimer);
@@ -251,7 +295,6 @@ promptArea.addEventListener("input", () => {
   }, 500);
 });
 
-// Save settings on change
 function saveSettings() {
   chrome.storage.local.set({
     [SETTINGS_KEY]: {

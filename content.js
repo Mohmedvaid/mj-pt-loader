@@ -17,7 +17,7 @@
 
   const SUBMIT_PAUSE = 350;
   const POST_SUBMIT_SETTLE = 600;
-  const QUEUE_POLL_INTERVAL = 2000; // check queue every 2 seconds
+  const QUEUE_POLL_INTERVAL = 2000;
 
   // ---- State ----
   let prompts = [];
@@ -25,6 +25,7 @@
   let running = false;
   let paused = false;
   let abortController = null;
+  let totalPrompts = 0;
 
   // ---- Messaging to popup ----
   function notify(type, data = {}) {
@@ -63,7 +64,6 @@
 
   // ---- Queue Detection ----
   function getQueueCount() {
-    // Look for the "X queued jobs" element
     const allDivs = document.querySelectorAll("div");
     for (const div of allDivs) {
       const text = div.textContent?.trim() || "";
@@ -72,7 +72,6 @@
         return parseInt(match[1], 10);
       }
     }
-    // Element not on page = no queued jobs
     return 0;
   }
 
@@ -141,10 +140,8 @@
     textarea.click();
     await sleep(50, signal);
 
-    // Set full text at once
     setNativeValue(textarea, text);
 
-    // Fire events so React picks it up
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
     textarea.dispatchEvent(
@@ -190,13 +187,11 @@
     while (currentIndex < prompts.length) {
       if (signal.aborted) break;
 
-      // Handle manual pause
       while (paused && !signal.aborted) {
         await sleep(250, signal).catch(() => {});
       }
       if (signal.aborted) break;
 
-      // Relaxed mode: wait for queue slot before submitting
       try {
         await waitForQueueSlot(signal);
       } catch (err) {
@@ -207,7 +202,7 @@
       const prompt = prompts[currentIndex];
       const label =
         prompt.match(/^(IMG\d{2,3})/)?.[1] || `#${currentIndex + 1}`;
-      logToPopup(`🎨 [${currentIndex + 1}/${prompts.length}] Sending ${label}...`);
+      logToPopup(`🎨 [${currentIndex + 1}/${totalPrompts}] Sending ${label}...`);
 
       try {
         const textarea = getTextarea();
@@ -221,9 +216,8 @@
         await submitPrompt(signal);
 
         currentIndex++;
-        notify("progress", { current: currentIndex, total: prompts.length });
+        notify("progress", { current: currentIndex, total: totalPrompts });
 
-        // Random delay before next
         if (currentIndex < prompts.length) {
           const delay = randomDelay();
           logToPopup(`⏳ Waiting ${(delay / 1000).toFixed(1)}s...`);
@@ -241,7 +235,7 @@
     }
 
     if (currentIndex >= prompts.length && prompts.length > 0) {
-      notify("done", { total: prompts.length });
+      notify("done", { total: totalPrompts });
     }
 
     running = false;
@@ -257,6 +251,18 @@
   // ---- Listen for messages from popup ----
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.action) {
+      case "getState":
+        sendResponse({
+          running,
+          paused,
+          currentIndex,
+          totalPrompts,
+          relaxedMode: RELAXED_MODE,
+          queueLimit: QUEUE_LIMIT,
+          queueCount: RELAXED_MODE ? getQueueCount() : 0,
+        });
+        break;
+
       case "start":
         if (running) {
           sendResponse({ ok: false, error: "Already running" });
@@ -264,6 +270,7 @@
         }
         prompts = msg.prompts || [];
         currentIndex = 0;
+        totalPrompts = prompts.length;
         MIN_DELAY = msg.minDelay || 1000;
         MAX_DELAY = msg.maxDelay || 3000;
         RELAXED_MODE = msg.relaxedMode || false;
